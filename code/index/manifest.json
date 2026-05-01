@@ -1,0 +1,40 @@
+{
+  "built_at": "2026-05-01T18:24:39.791002+00:00",
+  "chunk_overlap": 100,
+  "chunk_tokens": 600,
+  "determinism": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "seed": 42,
+    "temperature": 0.2
+  },
+  "embed_dim": 384,
+  "embed_model": "BAAI/bge-small-en-v1.5",
+  "finalized_at": "2026-05-01T19:46:39.715391+00:00",
+  "last_dev_eval_file": "runs\\llm_diff_full.md",
+  "models": {
+    "answerer": "llama-3.3-70b-versatile",
+    "embedder": "BAAI/bge-small-en-v1.5",
+    "gatekeeper": "llama-3.1-8b-instant",
+    "judge_offline_only": "qwen-2.5-32b"
+  },
+  "n_chunks": 1336,
+  "n_docs": 770,
+  "policy_hashes": {
+    "escalation.yaml": "a573f6ef072366ea246ec3e586991bd29dd237c9c33ab519548afc5b1cf3cbb3",
+    "prompt_injection_corpus.txt": "25c416b5f969508375c63e086c3c6fd2584f5330a8550d80dc4b241350847013"
+  },
+  "prompt_hashes": {
+    "answerer.txt": "d841dc7c46d2b0adea6b75ccc35c1c97ee3b9ceb5cf73dc96f9decc2d6edc8ff",
+    "gatekeeper.txt": "ed7fb8db71b3b868f37c963e003eed5d0e46b292f5529ff4455b71c6899122c6"
+  },
+  "requirements_sha256": "26c35ffab16c1e162b8948bc55d80ce6f09e4621f727315988782f281dfe4043",
+  "rrf_k": 60,
+  "thresholds": {
+    "answerer_max_tokens": 1500,
+    "gate_escalate_min_confidence": 0.5,
+    "gatekeeper_max_tokens": 512,
+    "low_gate_confidence": 0.3,
+    "validator_drop_threshold": 0.6
+  }
+}

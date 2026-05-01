@@ -31,3 +31,5 @@ data/index/
 data/embeddings/
 *.sqlite
 *.db
+CODING_PRACTICES.md
+ENGINEERING_BLUEPRINT.md

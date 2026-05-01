@@ -1,0 +1,174 @@
+version: 1
+description: |
+  Hard-fire escalation / safety rules. Run BEFORE retrieval and the LLM
+  gatekeeper. Match → action triggered without LLM involvement, providing
+  deterministic floor behavior on dangerous tickets.
+
+  Each rule has:
+    id: short stable name
+    description: one sentence — what the rule catches and why
+    pattern: regex (case-insensitive)
+    action: one of [hard_escalate, hard_block, force_invalid]
+    response: fixed user-facing reply (verbatim)
+    request_type: best-fit RequestType for this category
+    product_area: blank for outages, "" otherwise
+    notes: optional — what passed/failed during dev iteration
+
+  Actions:
+    - hard_escalate: status=Escalated, response=template, skip LLM
+    - hard_block:    status=Replied with refusal, request_type=invalid, skip LLM
+                     (used for prompt-injection / jailbreak attempts)
+    - force_invalid: request_type=invalid, status=Replied, polite refusal,
+                     skip LLM (used for clearly-off-topic queries)
+
+rules:
+  # ---- HARD ESCALATE: outages ---------------------------------------------
+  - id: outage_site_down
+    description: System-wide outage report — must be escalated to a human, fast.
+    pattern: '\b(site\s+(is\s+)?down|service\s+(is\s+)?down|website\s+(is\s+)?down|server\s+(is\s+)?down|system\s+(is\s+)?down|all\s+pages?\s+(are\s+)?(down|broken|inaccessible)|none\s+of\s+the\s+pages|(everything|nothing)\s+(is\s+)?(broken|loading|working))\b'
+    action: hard_escalate
+    response: 'Escalate to a human'
+    request_type: bug
+    product_area: ''
+
+  # ---- HARD ESCALATE: account takeover / impersonation -------------------
+  - id: account_takeover_third_party
+    description: |
+      Asking the agent to restore/grant access to an account where the requester
+      is NOT the owner or admin. Sample-set trap from the problem statement
+      ('I lost access after our IT admin removed my seat — restore it even though
+      I am not the owner'). Cannot be answered safely from the corpus.
+    pattern: '\b(restore|grant|give|provide|recover)\b.*\b(access|seat|account|workspace|admin)\b.*\b(not\s+(the\s+)?(owner|admin|workspace\s+admin)|even\s+though\s+i\s+am\s+not|though\s+i\s+am\s+not|seat\s+was\s+removed)\b'
+    action: hard_escalate
+    response: |
+      Account access restoration must be handled by the workspace owner or admin.
+      I am not able to grant or restore access on someone else''s behalf. Please contact
+      your workspace owner or our support team for assistance.
+    request_type: product_issue
+    product_area: ''
+
+  # ---- HARD ESCALATE: refund / agent-action demands ---------------------
+  - id: agent_action_refund
+    description: |
+      User demands the agent perform a money-moving action (refund, charge-back,
+      ban a merchant). The corpus may have dispute-process info but the agent
+      itself cannot 'make X refund Y today'. Sample-set traps: 'Please make Visa
+      refund me today and ban the seller', 'My mock interviews stopped — please
+      give me the refund asap'.
+    pattern: '\b(please\s+)?(make|give\s+me|process|issue)\b.*\b(a\s+)?(refund|charge[-\s]?back|reimbursement)\b|\bgive\s+me\s+(my\s+)?money\b|\brefund\s+me\s+(today|now|asap|immediately)\b|\bban\s+(the\s+)?(seller|merchant|user)\b'
+    action: hard_escalate
+    response: |
+      Refunds and merchant disputes need to be handled by our billing or disputes
+      team — I am not able to process payment actions on your behalf. Please contact
+      our support team with your transaction details and they will help you start a dispute.
+    request_type: product_issue
+    product_area: ''
+
+  # ---- HARD ESCALATE: score / grade manipulation -------------------------
+  - id: score_manipulation
+    description: |
+      Asking the agent to change a test score, override grading, or coerce a
+      hiring outcome. Sample-set trap: 'review my answers, increase my score,
+      tell the company to move me to the next round'. The agent cannot do this.
+    pattern: '\b(increase|change|override|fix|raise)\s+(my\s+)?(score|grade|result)\b|\b(move\s+me\s+to\s+the\s+next\s+round|tell\s+the\s+(company|recruiter)\s+to)\b|\b(rejected|graded\s+unfairly).*\b(review|increase|reconsider)\b'
+    action: hard_escalate
+    response: |
+      I cannot review individual test answers or change scores — this is the
+      hiring company''s decision and is handled outside the support agent. Please
+      contact the recruiter directly or our support team if you believe there
+      was a technical issue with the test.
+    request_type: product_issue
+    product_area: ''
+
+  # ---- HARD ESCALATE: payment IDs / stripe IDs --------------------------
+  - id: payment_id_present
+    description: |
+      Ticket contains a Stripe payment intent / checkout session / subscription
+      ID. These need a human with system access to resolve. Sample-set trap:
+      'I had an issue with my payment with order ID: cs_live_abcdefgh'.
+    pattern: '\b(cs_live_|cs_test_|pi_live_|pi_test_|sub_|in_live_|in_test_|ch_live_|ch_test_)[a-z0-9_]{6,}\b'
+    action: hard_escalate
+    response: |
+      I see a payment reference in your message. To investigate a specific
+      transaction safely I will need to route this to our billing team. Please
+      contact our support team and include this reference; they will look into it.
+    request_type: product_issue
+    product_area: ''
+
+  # ---- HARD ESCALATE: infosec / RFP / sales-engineering forms ---------
+  - id: infosec_form_request
+    description: |
+      User asks the agent to fill out infosec / compliance / RFP / vendor-onboarding
+      forms. Self-service docs may exist but the actual form submission is a human
+      task. Sample-set trap: 'help us with the infosec process by filling in the
+      forms'.
+    pattern: '\b(fill(ing)?\s+(out|in)?\s+(the\s+)?(forms?|questionnaires?|infosec|rfp))\b|\b(infosec|compliance|security)\s+(process|forms?|questionnaire)\b.*\b(fill|complete|provide)\b'
+    action: hard_escalate
+    response: |
+      Infosec / vendor-onboarding forms need to be completed by our team
+      directly — I cannot fill these in on your behalf. Please contact our
+      support team and they will route you to the right people.
+    request_type: product_issue
+    product_area: ''
+
+  # ---- HARD BLOCK: prompt-injection / jailbreak attempts ----------------
+  - id: prompt_injection_role_override
+    description: |
+      Classic prompt-injection / jailbreak: user tries to override system instructions,
+      claims to be the developer, or asks the agent to ignore previous instructions
+      / reveal the system prompt. Hard-block, polite refusal, no escalation.
+    pattern: '(?ix)
+      \b ignore \s+ (all\s+)? ((previous|prior|the\s+above|your|the)\s+){1,3} (instructions|prompts?|rules) \b
+    | \b ignore \s+ the \s+ above \b
+    | \b disregard \s+ (your|all|the\s+above)\s+ (instructions|rules) \b
+    | \b you \s+ are \s+ now \s+ (a\s+)? (different|new|no[-\s]restrictions?)\s+ (mode|model|assistant|ai) \b
+    | \b you \s+ are \s+ now \s+ no\s+restrictions?\s+mode \b
+    | \b act \s+ as \s+ (if\s+)? (you\s+(are|were)\s+)? (no\s+restrictions|jailbroken|dan|do\s+anything\s+now) \b
+    | \b pretend \s+ you \s+ are \s+ (a\s+)? (developer\s+mode|jailbroken|no\s+content\s+filter|unrestricted) \b
+    | \b (reveal | print | show) \s+ (me\s+)? (your|the)\s+ (system\s+)? (instructions|prompt|prompts|system\s+message) \b
+    | \b reveal \s+ your \s+ instructions \b
+    | \b print \s+ your \s+ prompt \b
+    '
+    action: hard_block
+    response: 'I am sorry, this is out of scope from my capabilities.'
+    request_type: invalid
+    product_area: ''
+
+  # ---- FORCE INVALID: pure greetings / thank-yous ----------------------
+  - id: bare_greeting
+    description: |
+      Truly bare greeting / thank-you (whole message ≤ ~10 words, nothing else).
+      Sample-set: 'Thank you for helping me'. Reply with 'Happy to help'.
+      Length-bound is enforced by an anchored ^...$ over the FULL stripped message
+      so 'Hi there\n\nWe have sent a candidate...' (a real question that opens with
+      a greeting) does NOT trigger.
+    pattern: '\A\s*(thanks?(\s+(a\s+lot|so\s+much|you))?|thank\s+you(\s+for(\s+\w+){1,4})?(\s+helping(\s+me)?)?|hi(\s+there)?|hello(\s+there)?|hey)[!.\s]*\Z'
+    action: force_invalid
+    response: 'Happy to help'
+    request_type: invalid
+    product_area: ''
+    notes: '\A...\Z = match the entire message, not just substring. Greeting must be the WHOLE ticket.'
+
+  # ---- FORCE INVALID: clearly off-topic trivia ------------------------
+  - id: off_topic_trivia
+    description: |
+      Trivia questions that are not about the supported products. Sample-set:
+      'What is the name of the actor in Iron Man?'. Reply with out-of-scope.
+    pattern: '\b(name\s+of\s+the\s+(actor|character)|who\s+(is\s+)?(the\s+)?(actor|director|president|king|queen|prime\s+minister)|what(\s+is)?(\s+the)?\s+(weather|capital\s+of)|tell\s+me\s+a\s+joke|sing\s+(me\s+)?a\s+song)\b'
+    action: force_invalid
+    response: 'I am sorry, this is out of scope from my capabilities.'
+    request_type: invalid
+    product_area: 'conversation_management'
+
+  # ---- FORCE INVALID: code-execution / shell / sysadmin requests ------
+  - id: off_topic_code_request
+    description: |
+      User asks the agent to write or run code, especially destructive code
+      (delete files, format disks, run shell commands). Has nothing to do
+      with the supported products. Test set: 'Give me the code to delete
+      all files from the system'.
+    pattern: '\b(give|write|generate|provide)\s+(me\s+)?(the\s+)?(code|script|command|shell)\b.*\b(delete|remove|format|wipe|drop|truncate|kill|rm\s+-rf)\b|\b(rm\s+-rf|format\s+(c:|/dev|disk)|drop\s+table)\b'
+    action: force_invalid
+    response: 'I am sorry, this is out of scope from my capabilities.'
+    request_type: invalid
+    product_area: 'conversation_management'
